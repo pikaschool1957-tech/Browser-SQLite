@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Browser SQLite CRUD Studio</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      max-width: 1000px;
+      margin: 1.5rem auto;
+      padding: 0 1rem;
+      color: #1e293b;
+    }
+    .bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .panel {
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 0.75rem;
+      margin-bottom: 1rem;
+      background: #fafafa;
+    }
+    button, select, input {
+      padding: 0.4rem 0.65rem;
+    }
+    button {
+      cursor: pointer;
+    }
+    textarea {
+      width: 100%;
+      box-sizing: border-box;
+      font-family: monospace;
+      padding: 0.5rem;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      background: #fff;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 0.4rem 0.6rem;
+      text-align: left;
+    }
+    th {
+      background: #f1f5f9;
+    }
+    td[contenteditable="true"] {
+      background: #fffef2;
+    }
+    #statusBar {
+      padding: 0.55rem 0.75rem;
+      border-radius: 4px;
+      background: #eef2ff;
+      color: #1e3a8a;
+      font-size: 0.9rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    #statusBar.error {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+    #statusBar.success {
+      background: #dcfce7;
+      color: #166534;
+    }
+    .log-box {
+      margin-top: 0.4rem;
+      font-family: monospace;
+      font-size: 0.8rem;
+      max-height: 200px;
+      overflow: auto;
+      border: 1px solid #e2e8f0;
+      padding: 0.5rem;
+      border-radius: 4px;
+      background: #f8fafc;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .log-item {
+      padding: 0.2rem 0;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .log-time {
+      color: #64748b;
+    }
+    .log-success {
+      color: #166534;
+    }
+    .log-error {
+      color: #991b1b;
+    }
+    .hidden {
+      display: none;
+    }
+  </style>
+  <script>
+    window.__bootErrors = [];
+
+    function formatErrorEvent(event) {
+      const targetSrc =
+        event.target && event.target.src ? ` [target.src=${event.target.src}]` : "";
+      const file = event.filename
+        ? `${event.filename}:${event.lineno || 0}:${event.colno || 0}`
+        : "unknown-file";
+      const msg =
+        event.message ||
+        (event.target && event.target.src
+          ? `Failed to load ${event.target.src}`
+          : "Script error");
+      const stack = event.error && event.error.stack ? `\nStack: ${event.error.stack}` : "";
+      return `${msg} — at ${file}${targetSrc}${stack}`;
+    }
+
+    window.addEventListener(
+      "error",
+      (event) => {
+        const detailed = formatErrorEvent(event);
+        window.__bootErrors.push(detailed);
+        const bar = document.getElementById("statusBar");
+        if (bar) {
+          bar.textContent = `Debug Error: ${detailed}`;
+          bar.className = "error";
+        }
+        const log = document.getElementById("statusLog");
+        if (log) {
+          const div = document.createElement("div");
+          div.className = "log-item log-error";
+          div.textContent = `[BOOT ERROR] ${detailed}`;
+          log.prepend(div);
+        }
+      },
+      true
+    );
+
+    window.addEventListener("unhandledrejection", (event) => {
+      const reason =
+        event.reason && event.reason.stack
+          ? `${event.reason.message}\nStack: ${event.reason.stack}`
+          : event.reason && event.reason.message
+            ? event.reason.message
+            : String(event.reason);
+      window.__bootErrors.push(reason);
+      const bar = document.getElementById("statusBar");
+      if (bar) {
+        bar.textContent = `Unhandled Rejection: ${reason}`;
+        bar.className = "error";
+      }
+      const log = document.getElementById("statusLog");
+      if (log) {
+        const div = document.createElement("div");
+        div.className = "log-item log-error";
+        div.textContent = `[UNHANDLED REJECTION] ${reason}`;
+        log.prepend(div);
+      }
+    });
+  </script>
+  <script
+    src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.11.0/sql-wasm.js"
+    onerror="window.dispatchEvent(new CustomEvent('unhandledrejection', { detail: new Error('Failed to load sql-wasm.js from CDN') }))"
+  ></script>
+</head>
+<body>
+  <h1>Browser SQLite CRUD Studio</h1>
+
+  <!-- DB & Table Controls -->
+  <div class="bar">
+    <button id="newDbBtn">New DB</button>
+    <input type="file" id="fileInput" accept=".sqlite,.db,.sqlite3" hidden />
+    <button id="loadDbBtn">Load DB</button>
+    <button id="saveDbBtn">Save DB</button>
+    <span>|</span>
+    <label for="tableSelect">Table:</label>
+    <select id="tableSelect"></select>
+    <button id="toggleCreateTableBtn">+ New Table</button>
+    <button id="toggleInsertRowBtn">+ Insert Row</button>
+    <button id="toggleQueryConsoleBtn">SQL Console</button>
+  </div>
+
+  <!-- Create Table Form (toggled on demand) -->
+  <div id="createTablePanel" class="panel hidden">
+    <strong>Create Table</strong>
+    <div class="bar" style="margin-top:0.5rem; margin-bottom:0;">
+      <input id="newTableName" placeholder="Table name (e.g. tasks)" />
+      <input
+        id="newColDefs"
+        placeholder="Columns: title TEXT NOT NULL, done INTEGER DEFAULT 0"
+        style="min-width:320px;"
+      />
+      <button id="createTableSubmitBtn">Create</button>
+    </div>
+  </div>
+
+  <!-- Insert Row Form (toggled on demand) -->
+  <div id="insertRowPanel" class="panel hidden">
+    <strong>Insert Row</strong>
+    <div id="insertFields" class="bar" style="margin-top:0.5rem;"></div>
+    <button id="insertRowSubmitBtn">Save Row</button>
+  </div>
+
+  <!-- SQL Query Console Panel (toggled on demand) -->
+  <div id="queryConsolePanel" class="panel hidden">
+    <div class="bar" style="margin-bottom:0.5rem;">
+      <strong>SQL Query Console</strong>
+      <select id="sqlSnippetSelect">
+        <option value="">Insert sample SQL...</option>
+        <option value="SELECT * FROM notes ORDER BY id DESC;">SELECT all notes</option>
+        <option value="SELECT name, sql FROM sqlite_master WHERE type='table';">List table schemas</option>
+        <option value="PRAGMA table_info('notes');">Inspect notes columns</option>
+      </select>
+      <button id="runSqlBtn">Run SQL (Ctrl+Enter)</button>
+      <button id="clearSqlBtn">Clear</button>
+    </div>
+    <textarea
+      id="sqlInput"
+      rows="4"
+      placeholder="Write SQL here (e.g. SELECT * FROM notes;)"
+    ></textarea>
+    <div id="queryResultDisplay" style="margin-top:0.75rem;"></div>
+  </div>
+
+  <!-- Main Editable Data Display Area -->
+  <div id="dataDisplay"></div>
+
+  <!-- Status Bar & Collapsible Activity Log -->
+  <div id="statusBar" style="margin-top:1rem;">Starting...</div>
+  <details style="margin-top:0.5rem;" open>
+    <summary style="cursor:pointer; font-size:0.85rem; color:#475569;">Activity Log</summary>
+    <div id="statusLog" class="log-box"></div>
+  </details>
+
+  <!-- Load non-module helpers first, then start ES module entry point -->
+  <script src="./js/gridView.js"></script>
+  <script src="./js/queryConsole.js"></script>
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>
